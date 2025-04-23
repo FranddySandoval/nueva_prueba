@@ -30,7 +30,6 @@ if (!isset($_SESSION['chat'])) {
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Aceptar tanto 'pregunta' como 'message'
     $texto_original = trim($_POST['pregunta'] ?? $_POST['message'] ?? '');
     if ($texto_original === '') {
         echo json_encode(['reply' => 'No se recibió ningún mensaje.']);
@@ -39,7 +38,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $pregunta = normalizar($texto_original);
 
-    // Intentar leer la tabla; si falla, devolvemos error
+    // Cargamos todas las posibles respuestas
     try {
         $stmt = $pdo->query("SELECT * FROM respuestas");
         $respuestas = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -50,19 +49,41 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     $respuesta_encontrada = '';
 
-    // Primero: coincidencia de dos palabras clave
+    // 1) Tres palabras clave
     foreach ($respuestas as $fila) {
-        if (!empty($fila['palabra_clave2'])) {
+        if (!empty($fila['palabra_clave3'])) {
             $k1 = normalizar($fila['palabra_clave1']);
             $k2 = normalizar($fila['palabra_clave2']);
-            if (strpos($pregunta, $k1) !== false && strpos($pregunta, $k2) !== false) {
+            $k3 = normalizar($fila['palabra_clave3']);
+            if (
+                strpos($pregunta, $k1) !== false &&
+                strpos($pregunta, $k2) !== false &&
+                strpos($pregunta, $k3) !== false
+            ) {
                 $respuesta_encontrada = $fila['respuesta'];
                 break;
             }
         }
     }
 
-    // Si no hubo, buscar con una sola palabra clave
+    // 2) Dos palabras clave
+    if ($respuesta_encontrada === '') {
+        foreach ($respuestas as $fila) {
+            if (!empty($fila['palabra_clave2'])) {
+                $k1 = normalizar($fila['palabra_clave1']);
+                $k2 = normalizar($fila['palabra_clave2']);
+                if (
+                    strpos($pregunta, $k1) !== false &&
+                    strpos($pregunta, $k2) !== false
+                ) {
+                    $respuesta_encontrada = $fila['respuesta'];
+                    break;
+                }
+            }
+        }
+    }
+
+    // 3) Una sola palabra clave
     if ($respuesta_encontrada === '') {
         foreach ($respuestas as $fila) {
             if (empty($fila['palabra_clave2'])) {
@@ -75,9 +96,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
 
+    // 4) Por defecto si no hay coincidencia
     if ($respuesta_encontrada === '') {
         $respuesta_encontrada = 'Lo siento, no tengo una respuesta para eso.';
     }
+
+    // --- Formateo: si hay varias líneas, las mantiene tal cual, una por línea ---
+    if (strpos($respuesta_encontrada, "\n") !== false) {
+        $lineas = array_filter(array_map('trim', explode("\n", $respuesta_encontrada)));
+        $respuesta_encontrada = implode("\n", $lineas);
+    }
+    // --- Fin formateo ---
 
     // Guardar en historial de chat
     $_SESSION['chat'][] = [
@@ -86,9 +115,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     ];
 
     // Devolver JSON al cliente
-    echo json_encode(['reply' => $respuesta_encontrada]);
+    echo json_encode(['reply' => $respuesta_encontrada], JSON_UNESCAPED_UNICODE);
     exit;
 }
 
-// Si llegan GET u otro método
+// Métodos no soportados
 echo json_encode(['reply' => 'Método no soportado.']);
